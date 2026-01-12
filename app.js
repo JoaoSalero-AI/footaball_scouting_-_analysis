@@ -251,4 +251,123 @@ function renderSeason(seasonKey){
   setText("kpiSdrPct", fmtPct(s.dribbling.sdrPct));
   setText("kpiSdrVol", `${fmt1(s.dribbling.sdrPerMatch)} successful dribbles / match`);
 
-  setText("kpiXg", s.additional
+  setText("kpiXg", s.additional.xg);
+  setText("kpiXa", s.additional.xa);
+  setText("kpiGi", s.additional.gi);
+  setText("kpiXgi", s.additional.xgi);
+
+  // Tables
+  setText("finShots", s.finishing.shots);
+  setText("finSot", s.finishing.sot);
+  setText("finBcm", s.finishing.bcm);
+
+  setText("creKeyp", s.creativity.keyp);
+  setText("creBcc", s.creativity.bcc);
+  setText("creSdr", s.creativity.sdr);
+
+  setText("pasAps", s.passing.aps);
+  setText("pasPct", fmtPct(s.passing.apsPct));
+  setText("pasAlb", s.passing.alb);
+  setText("pasLbPct", fmtPct(s.passing.lbaPct));
+
+  setText("defTack", s.defending.tack);
+  setText("defInt", s.defending.int);
+  setText("defYc", s.defending.yc);
+
+  setText("addXg", s.additional.xg);
+  setText("addXa", s.additional.xa);
+  setText("addGi", s.additional.gi);
+  setText("addXgi", s.additional.xgi);
+
+  // SDR context narrative
+  setText("sdrContext", buildSdrContext(seasonKey));
+}
+
+function initSeasonSelect(state){
+  const s = el("seasonSelect");
+  s.innerHTML = "";
+  SEASON_ORDER.forEach(k=>{
+    const o = document.createElement("option");
+    o.value = k;
+    o.textContent = k;
+    s.appendChild(o);
+  });
+  s.value = state.season;
+
+  s.addEventListener("change", ()=>{
+    state.season = s.value;
+    renderSeason(state.season);
+    setText("status", `Status: season applied → ${state.season}.`);
+  });
+}
+
+/* Drag dot */
+function initPitchDrag(){
+  const dot = el("posDot");
+  const pitch = dot.parentElement;
+  let dragging = false;
+
+  const clamp = (n,min,max)=>Math.max(min,Math.min(max,n));
+
+  dot.addEventListener("mousedown",(e)=>{
+    dragging = true;
+    dot.style.cursor = "grabbing";
+    e.preventDefault();
+  });
+  window.addEventListener("mouseup",()=>{
+    dragging = false;
+    dot.style.cursor = "grab";
+  });
+  window.addEventListener("mousemove",(e)=>{
+    if (!dragging) return;
+    const r = pitch.getBoundingClientRect();
+    const x = clamp(e.clientX - r.left, 0, r.width);
+    const y = clamp(e.clientY - r.top, 0, r.height);
+    dot.style.left = (x/r.width*100).toFixed(2) + "%";
+    dot.style.top  = (y/r.height*100).toFixed(2) + "%";
+  });
+}
+
+function initSummaryButton(state){
+  el("btnSummary").addEventListener("click", ()=>{
+    const s = SEASONS[state.season];
+    const ref = refDateForSeason(state.season);
+    const age = ageAt(PLAYER.dobISO, ref);
+
+    const msg =
+`SCOUTING SUMMARY
+Player: ${PLAYER.name}
+Season: ${state.season}
+Club: ${s.club} | League: ${s.league}
+Age (ref ${ref.toISOString().slice(0,10)}): ${age}
+Position: ${PLAYER.primaryPosition}
+
+Dribbling (key criterion):
+SDR% ${s.dribbling.sdrPct.toFixed(1)} | Successful dribbles/match ${s.dribbling.sdrPerMatch.toFixed(1)}
+
+Core production:
+MP ${s.general.mp} | MIN ${s.general.min} | G ${s.general.gls} | A ${s.general.ast} | Rating ${s.general.rating.toFixed(2)}
+
+Additional:
+xG ${s.additional.xg} | xA ${s.additional.xa} | GI ${s.additional.gi} | xGI ${s.additional.xgi}`;
+
+    alert(msg);
+  });
+}
+
+/* ========= BOOTSTRAP ========= */
+
+const state = { season: CONFIG.DEFAULT_SEASON };
+
+function init(){
+  renderStatic();
+  initSeasonSelect(state);
+  initPitchDrag();
+  initSummaryButton(state);
+
+  renderSeason(state.season);
+  renderCharts();
+  setText("status", `Status: ready (default season ${state.season}, frozen date ${CONFIG.FROZEN_TODAY_ISO}).`);
+}
+
+init();
