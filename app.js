@@ -1,368 +1,254 @@
 // app.js (CONTROLLER + VIEW)
 import { CONFIG, PLAYER, SEASONS, SEASON_ORDER } from "./data.js";
 
-/* =========================
-   MODEL HELPERS
-========================= */
+/* ========= MODEL HELPERS ========= */
 
-function parseISODate(iso) {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d));
+function parseISO(iso){
+  const [y,m,d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m-1, d));
 }
 
-function computeAge(dobISO, refDate) {
-  // age at refDate (UTC safe enough for this use)
-  const dob = parseISODate(dobISO);
-  let age = refDate.getUTCFullYear() - dob.getUTCFullYear();
-  const m = refDate.getUTCMonth() - dob.getUTCMonth();
-  if (m < 0 || (m === 0 && refDate.getUTCDate() < dob.getUTCDate())) age--;
-  return age;
-}
-
-function seasonStartYear(seasonKey) {
-  // "2025/26" -> 2025
+function seasonStartYear(seasonKey){
   return Number(seasonKey.split("/")[0]);
 }
 
-function referenceDateForSeason(seasonKey) {
-  if (seasonKey === CONFIG.DEFAULT_SEASON) {
-    return parseISODate(CONFIG.FROZEN_TODAY_ISO); // your frozen "today"
-  }
+function refDateForSeason(seasonKey){
+  if (seasonKey === CONFIG.DEFAULT_SEASON) return parseISO(CONFIG.FROZEN_TODAY_ISO);
   const y = seasonStartYear(seasonKey);
-  return new Date(Date.UTC(y, CONFIG.PAST_SEASON_REF_MONTH - 1, CONFIG.PAST_SEASON_REF_DAY));
+  return new Date(Date.UTC(y, CONFIG.PAST_REF_MONTH-1, CONFIG.PAST_REF_DAY));
 }
 
-/* =========================
-   VIEW HELPERS
-========================= */
-
-const el = (id) => document.getElementById(id);
-
-function setText(id, value) {
-  const node = el(id);
-  if (!node) return;
-  node.textContent = value ?? "—";
+function ageAt(dobISO, ref){
+  const dob = parseISO(dobISO);
+  let age = ref.getUTCFullYear() - dob.getUTCFullYear();
+  const m = ref.getUTCMonth() - dob.getUTCMonth();
+  if (m < 0 || (m === 0 && ref.getUTCDate() < dob.getUTCDate())) age--;
+  return age;
 }
 
-function fmtNum(n) {
+/* ========= VIEW HELPERS ========= */
+
+const el = (id)=>document.getElementById(id);
+
+function setText(id, v){
+  const n = el(id);
+  if (!n) return;
+  n.textContent = (v === null || v === undefined) ? "—" : String(v);
+}
+
+function fmtPct(n){
   if (n === null || n === undefined) return "—";
-  if (typeof n === "number") return String(n);
-  return String(n);
+  return `${Number(n).toFixed(1)}%`;
 }
 
-function fmtPct(n) {
+function fmt2(n){
   if (n === null || n === undefined) return "—";
-  return `${n.toFixed(1)}%`;
+  return Number(n).toFixed(2);
 }
 
-function fmtRating(n) {
+function fmt1(n){
   if (n === null || n === undefined) return "—";
-  return n.toFixed(2);
+  return Number(n).toFixed(1);
 }
 
-function renderStaticIdentity() {
-  setText("p-name", PLAYER.name);
-  setText("p-nat", PLAYER.nationality);
-  setText("p-dob", "03 Jun 2005");                 // keep display-friendly
-  setText("p-height", `${PLAYER.heightCm} cm`);
-  setText("p-weight", PLAYER.weightKg ? `${PLAYER.weightKg} kg` : "[Add later]");
-  setText("p-foot", PLAYER.preferredFoot);
-  setText("p-shirt", fmtNum(PLAYER.shirtNumber));
-  setText("p-position", PLAYER.primaryPosition);
-  setText("p-profile", PLAYER.profile);
-  setText("p-value", PLAYER.marketValue);
-  setText("p-nt", PLAYER.nationalTeam);
-  setText("p-transfers", PLAYER.transfers.join(" | "));
+/* ========= CHARTS (Canvas) ========= */
 
-  // pitch default
+const PALETTE = {
+  blue: "#004D98",
+  maroon: "#A50044",
+  gold: "#EDBB00",
+  ink: "#111111",
+  muted: "#58626d",
+};
+
+function clear(ctx,w,h){ ctx.clearRect(0,0,w,h); }
+
+function axes(ctx,w,h,p){
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = PALETTE.ink;
+  ctx.beginPath();
+  ctx.moveTo(p,p);
+  ctx.lineTo(p,h-p);
+  ctx.lineTo(w-p,h-p);
+  ctx.stroke();
+}
+
+function yLabel(ctx, text, x, y){
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(-Math.PI/2);
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
+function lineChart(canvasId, labels, values, yText){
+  const c = el(canvasId);
+  const ctx = c.getContext("2d");
+  const w=c.width, h=c.height;
+  const p=34;
+
+  clear(ctx,w,h);
+  axes(ctx,w,h,p);
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const yMin = min - 5;
+  const yMax = max + 5;
+
+  ctx.fillStyle = PALETTE.muted;
+  ctx.font = "11px Arial";
+  yLabel(ctx, yText, 12, h/2+20);
+
+  const step = (w-2*p)/(labels.length-1);
+
+  ctx.strokeStyle = PALETTE.maroon;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  values.forEach((v,i)=>{
+    const x = p + i*step;
+    const y = (h-p) - ((v-yMin)/(yMax-yMin))*(h-2*p);
+    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  values.forEach((v,i)=>{
+    const x = p + i*step;
+    const y = (h-p) - ((v-yMin)/(yMax-yMin))*(h-2*p);
+
+    ctx.fillStyle = PALETTE.gold;
+    ctx.beginPath(); ctx.arc(x,y,4,0,Math.PI*2); ctx.fill();
+
+    ctx.fillStyle = PALETTE.ink;
+    ctx.font = "11px Arial";
+    ctx.fillText(labels[i], x-18, h-10);
+    ctx.fillText(`${v.toFixed(1)}%`, x-18, y-10);
+  });
+}
+
+function barChart(canvasId, labels, values, yText){
+  const c = el(canvasId);
+  const ctx = c.getContext("2d");
+  const w=c.width, h=c.height;
+  const p=34;
+
+  clear(ctx,w,h);
+  axes(ctx,w,h,p);
+
+  const max = Math.max(...values, 1);
+  const slot = (w-2*p)/labels.length;
+  const bw = slot*0.55;
+
+  ctx.fillStyle = PALETTE.muted;
+  ctx.font = "11px Arial";
+  yLabel(ctx, yText, 12, h/2+20);
+
+  labels.forEach((lab,i)=>{
+    const x0 = p + i*slot + (slot-bw)/2;
+    const bh = (values[i]/max)*(h-2*p);
+    const y0 = (h-p)-bh;
+
+    ctx.fillStyle = PALETTE.blue;
+    ctx.fillRect(x0,y0,bw,bh);
+
+    ctx.strokeStyle = PALETTE.ink;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x0,y0,bw,bh);
+
+    ctx.fillStyle = PALETTE.ink;
+    ctx.font = "11px Arial";
+    ctx.fillText(lab, x0-2, h-10);
+    ctx.fillText(String(values[i]), x0 + bw/2 - 4, y0 - 8);
+  });
+}
+
+function renderCharts(){
+  const labels = SEASON_ORDER;
+  const sdr = labels.map(s => SEASONS[s].dribbling.sdrPct);
+  const gi  = labels.map(s => SEASONS[s].additional.gi);
+
+  lineChart("chartSdr", labels, sdr, "SDR%");
+  barChart("chartGi", labels, gi, "GI (G+A)");
+}
+
+/* ========= RENDER ========= */
+
+function renderStatic(){
+  setText("pName", PLAYER.name);
+  setText("pNat", PLAYER.nationality);
+  setText("pDob", "03 Jun 2005");
+  setText("pHw", `${PLAYER.heightCm} cm / ${PLAYER.weightKg} kg`);
+  setText("pFoot", PLAYER.preferredFoot);
+  setText("pShirt", PLAYER.shirtNumber);
+  setText("pPos", PLAYER.primaryPosition);
+  setText("pValue", PLAYER.marketValue);
+  setText("pNT", PLAYER.nationalTeam);
+  setText("pTransfers", PLAYER.transfers.join(" | "));
+
+  setText("txtPhysical", PLAYER.reportText.physical);
+  setText("txtTechnical", PLAYER.reportText.technical);
+  setText("txtTactical", PLAYER.reportText.tactical);
+  setText("txtOpinion", PLAYER.reportText.opinion);
+
+  // pitch dot default
   const dot = el("posDot");
   dot.style.left = `${PLAYER.pitchDot.leftPct}%`;
-  dot.style.top = `${PLAYER.pitchDot.topPct}%`;
+  dot.style.top  = `${PLAYER.pitchDot.topPct}%`;
   setText("posTag", "RW");
 }
 
-function renderSeason(seasonKey) {
+function buildSdrContext(seasonKey){
+  const s = SEASONS[seasonKey];
+  const pct = s.dribbling.sdrPct;
+
+  const [l1Low, l1High] = CONFIG.LIGUE1_AVG_WINGER_SDR_PCT_RANGE;
+  const good = CONFIG.EURO_TOP_WINGER_SDR_PCT_GOOD;
+  const diff = CONFIG.EURO_TOP_WINGER_SDR_PCT_DIFFERENTIATOR;
+  const elite = CONFIG.EURO_TOP_WINGER_SDR_PCT_ELITE;
+
+  let band = "below average";
+  if (pct >= l1Low && pct <= l1High) band = "around Ligue 1 average";
+  else if (pct > l1High && pct < diff) band = "good (above Ligue 1 average)";
+  else if (pct >= diff && pct < elite) band = "very good (European differentiator range)";
+  else if (pct >= elite) band = "elite (outstanding dribbling range)";
+
+  return `Definition:
+• SDR% (Successful Dribble Rate) = successful dribbles / attempted dribbles. It measures 1v1 dribble efficiency (not physical duels).
+
+Benchmarks (heuristic bands used for scouting context):
+• Typical Ligue 1 winger baseline: ~${l1Low}–${l1High}% SDR
+• Top-club winger (European level): ${good}%+ is “good”, ${diff}%+ is a differentiator, ${elite}%+ is elite
+
+Current season selected (${seasonKey}):
+• Doué SDR%: ${pct.toFixed(1)}% → ${band}
+• Volume indicator: ${s.dribbling.sdrPerMatch.toFixed(1)} successful dribbles per match
+Note: maintaining a high SDR% with meaningful volume is the key signal for “outstanding dribbling ability.”`;
+}
+
+function renderSeason(seasonKey){
   const s = SEASONS[seasonKey];
   if (!s) return;
 
-  // season identity
-  setText("p-club", s.club);
-  setText("p-league", s.league);
+  setText("chipSeason", `Season: ${seasonKey}`);
+  setText("pClub", s.club);
+  setText("pLeague", s.league);
 
-  // age
-  const ref = referenceDateForSeason(seasonKey);
-  const age = computeAge(PLAYER.dobISO, ref);
-  setText("p-age", `${age} (ref: ${ref.toISOString().slice(0,10)})`);
+  const ref = refDateForSeason(seasonKey);
+  const age = ageAt(PLAYER.dobISO, ref);
+  setText("pAge", `${age} (ref: ${ref.toISOString().slice(0,10)})`);
 
-  // left KPIs
-  setText("kpi-mp", fmtNum(s.general.mp));
-  setText("kpi-min", fmtNum(s.general.min));
-  setText("kpi-gls", fmtNum(s.general.gls));
-  setText("kpi-ast", fmtNum(s.general.ast));
-  setText("kpi-rating", fmtRating(s.general.rating));
-  setText("kpi-xg", fmtNum(s.additional.xg));
-  setText("kpi-xa", fmtNum(s.additional.xa));
-  setText("kpi-gi", fmtNum(s.additional.gi));
-  setText("kpi-xgi", fmtNum(s.additional.xgi));
+  const note = (seasonKey === CONFIG.DEFAULT_SEASON)
+    ? `Default view uses frozen date ${CONFIG.FROZEN_TODAY_ISO} for reproducibility.`
+    : `Age reference for past seasons: 01/08/${seasonStartYear(seasonKey)}.`;
+  setText("ageRefNote", note);
 
-  // tables
-  setText("fin-shots", fmtNum(s.finishing.shots));
-  setText("fin-sot", fmtNum(s.finishing.sot));
-  setText("fin-bcm", fmtNum(s.finishing.bcm));
+  // KPIs
+  setText("kpiMp", s.general.mp);
+  setText("kpiMin", s.general.min);
+  setText("kpiGls", s.general.gls);
+  setText("kpiAst", s.general.ast);
+  setText("kpiRating", fmt2(s.general.rating));
 
-  setText("cre-keyp", fmtNum(s.creativity.keyp));
-  setText("cre-bcc", fmtNum(s.creativity.bcc));
-  setText("cre-sdr", fmtNum(s.creativity.sdr));
+  setText("kpiSdrPct", fmtPct(s.dribbling.sdrPct));
+  setText("kpiSdrVol", `${fmt1(s.dribbling.sdrPerMatch)} successful dribbles / match`);
 
-  setText("pas-aps", fmtNum(s.passes.aps));
-  setText("pas-pct", fmtPct(s.passes.apsPct));
-  setText("pas-alb", fmtNum(s.passes.alb));
-  setText("pas-lbpct", fmtPct(s.passes.lbaPct));
-
-  setText("def-tack", fmtNum(s.defense.tack));
-  setText("def-int", fmtNum(s.defense.inter));
-  setText("def-yc", fmtNum(s.defense.yc));
-
-  setText("add-xg", fmtNum(s.additional.xg));
-  setText("add-xa", fmtNum(s.additional.xa));
-  setText("add-gi", fmtNum(s.additional.gi));
-  setText("add-xgi", fmtNum(s.additional.xgi));
-
-  // requirements block (rubric visibility)
-  // Eligibility: first-division in allowed market (France) and not Barcelona
-  setText("req-eligibility", `${s.league} (France) – first division; not FC Barcelona`);
-  setText("req-winger", "Yes (RW / Winger)");
-  setText("req-age", age >= 18 && age <= 25 ? `Yes (${age})` : `No (${age})`);
-
-  // Dribbling requirement: we flag as "to be supported" until you paste your written technical notes.
-  // This keeps the file objective while still satisfying rubric emphasis.
-  setText("req-dribbling", "Yes (to be evidenced in Technical characteristics + 1v1 clips)");
-
-  // reference date hint
-  const hint = seasonKey === CONFIG.DEFAULT_SEASON
-    ? `Default view uses frozen date ${CONFIG.FROZEN_TODAY_ISO}.`
-    : `Age reference: ${String(CONFIG.PAST_SEASON_REF_DAY).padStart(2,"0")}/${String(CONFIG.PAST_SEASON_REF_MONTH).padStart(2,"0")}/${seasonStartYear(seasonKey)}.`;
-  setText("refDateHint", hint);
-}
-
-/* =========================
-   CHARTS (simple canvas)
-========================= */
-
-function clearCanvas(ctx, w, h) {
-  ctx.clearRect(0, 0, w, h);
-}
-
-function drawAxes(ctx, w, h, pad) {
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "#111";
-  ctx.beginPath();
-  ctx.moveTo(pad, pad);
-  ctx.lineTo(pad, h - pad);
-  ctx.lineTo(w - pad, h - pad);
-  ctx.stroke();
-}
-
-function drawLineChart(canvasId, labels, values, yMinPad=0.2, yMaxPad=0.2) {
-  const c = el(canvasId);
-  const ctx = c.getContext("2d");
-  const w = c.width, h = c.height;
-  const pad = 28;
-
-  clearCanvas(ctx, w, h);
-  drawAxes(ctx, w, h, pad);
-
-  const minV = Math.min(...values);
-  const maxV = Math.max(...values);
-  const yMin = minV - yMinPad;
-  const yMax = maxV + yMaxPad;
-
-  const xStep = (w - 2*pad) / (labels.length - 1);
-
-  // line
-  ctx.strokeStyle = "#111";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  values.forEach((v, i) => {
-    const x = pad + i * xStep;
-    const y = (h - pad) - ((v - yMin) / (yMax - yMin)) * (h - 2*pad);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-
-  // points + labels
-  ctx.fillStyle = "#111";
-  ctx.font = "11px Arial";
-  values.forEach((v, i) => {
-    const x = pad + i * xStep;
-    const y = (h - pad) - ((v - yMin) / (yMax - yMin)) * (h - 2*pad);
-    ctx.beginPath();
-    ctx.arc(x, y, 3, 0, Math.PI*2);
-    ctx.fill();
-
-    ctx.fillText(labels[i], x - 18, h - 10);
-    ctx.fillText(v.toFixed(2), x - 14, y - 8);
-  });
-}
-
-function drawBarChart(canvasId, labels, values) {
-  const c = el(canvasId);
-  const ctx = c.getContext("2d");
-  const w = c.width, h = c.height;
-  const pad = 28;
-
-  clearCanvas(ctx, w, h);
-  drawAxes(ctx, w, h, pad);
-
-  const maxV = Math.max(...values, 1);
-  const barW = (w - 2*pad) / labels.length * 0.6;
-  const gap = (w - 2*pad) / labels.length * 0.4;
-
-  ctx.fillStyle = "#111";
-  ctx.font = "11px Arial";
-
-  labels.forEach((lab, i) => {
-    const x0 = pad + i * (barW + gap) + gap/2;
-    const barH = (values[i] / maxV) * (h - 2*pad);
-    const y0 = (h - pad) - barH;
-
-    ctx.strokeStyle = "#111";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x0, y0, barW, barH);
-
-    ctx.fillText(lab, x0 - 2, h - 10);
-    ctx.fillText(String(values[i]), x0 + barW/2 - 4, y0 - 6);
-  });
-}
-
-function renderCharts() {
-  const labels = SEASON_ORDER;
-  const ratings = labels.map(s => SEASONS[s].general.rating);
-  const gi = labels.map(s => SEASONS[s].additional.gi);
-
-  drawLineChart("chartRating", labels, ratings, 0.15, 0.15);
-  drawBarChart("chartGI", labels, gi);
-}
-
-/* =========================
-   CONTROLLER (events + state)
-========================= */
-
-const state = {
-  season: CONFIG.DEFAULT_SEASON,
-  mode: "LIVE"
-};
-
-function setStatus(msg) {
-  setText("statusLine", `Status: ${msg}`);
-}
-
-function initSeasonSelect() {
-  const sel = el("seasonSelect");
-  sel.innerHTML = "";
-  SEASON_ORDER.forEach(s => {
-    const opt = document.createElement("option");
-    opt.value = s;
-    opt.textContent = s;
-    sel.appendChild(opt);
-  });
-  sel.value = state.season;
-
-  sel.addEventListener("change", () => {
-    state.season = sel.value;
-    renderSeason(state.season);
-    setStatus(`season applied → ${state.season} (${state.mode})`);
-  });
-}
-
-function initModeToggle() {
-  const bLive = el("toggleLive");
-  const bVideo = el("toggleVideo");
-
-  function applyMode(mode) {
-    state.mode = mode;
-    bLive.classList.toggle("active", mode === "LIVE");
-    bVideo.classList.toggle("active", mode === "VIDEO");
-    setStatus(`mode set to ${mode} (season ${state.season})`);
-  }
-
-  bLive.addEventListener("click", () => applyMode("LIVE"));
-  bVideo.addEventListener("click", () => applyMode("VIDEO"));
-}
-
-function initScoutingSummary() {
-  el("btnScouting").addEventListener("click", () => {
-    const s = SEASONS[state.season];
-    const ref = referenceDateForSeason(state.season);
-    const age = computeAge(PLAYER.dobISO, ref);
-
-    const summary =
-`SCOUTING SUMMARY
-Player: ${PLAYER.name}
-Season: ${state.season}
-Club: ${s.club} | League: ${s.league}
-Age (ref ${ref.toISOString().slice(0,10)}): ${age}
-Position: ${PLAYER.primaryPosition}
-Mode: ${state.mode}
-
-Core:
-MP ${s.general.mp} | MIN ${s.general.min} | G ${s.general.gls} | A ${s.general.ast} | Rating ${s.general.rating.toFixed(2)}
-
-Additional:
-xG ${s.additional.xg} | xA ${s.additional.xa} | GI ${s.additional.gi} | xGI ${s.additional.xgi}
-
-Reminder:
-Complete the written sections (Physical/Technical/Tactical/Personal opinion) + add match observations.`;
-
-    alert(summary);
-  });
-}
-
-/* Drag dot */
-function initPitchDotDrag() {
-  const dot = el("posDot");
-  const pitch = dot.parentElement;
-  let dragging = false;
-
-  const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
-
-  dot.addEventListener("mousedown", (e) => {
-    dragging = true;
-    dot.style.cursor = "grabbing";
-    e.preventDefault();
-  });
-
-  window.addEventListener("mouseup", () => {
-    dragging = false;
-    dot.style.cursor = "grab";
-  });
-
-  window.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
-    const r = pitch.getBoundingClientRect();
-    const x = clamp(e.clientX - r.left, 0, r.width);
-    const y = clamp(e.clientY - r.top, 0, r.height);
-    dot.style.left = (x / r.width * 100).toFixed(2) + "%";
-    dot.style.top  = (y / r.height * 100).toFixed(2) + "%";
-  });
-}
-
-/* =========================
-   BOOTSTRAP
-========================= */
-
-function init() {
-  renderStaticIdentity();
-  initSeasonSelect();
-  initModeToggle();
-  initScoutingSummary();
-  initPitchDotDrag();
-
-  // initial render
-  renderSeason(state.season);
-  renderCharts();
-  setStatus(`ready (default season ${state.season}, frozen date ${CONFIG.FROZEN_TODAY_ISO})`);
-}
-
-init();
+  setText("kpiXg", s.additional
