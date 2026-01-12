@@ -26,7 +26,7 @@ function seasonStartYear(seasonKey) {
 
 function referenceDateForSeason(seasonKey) {
   if (seasonKey === CONFIG.DEFAULT_SEASON) {
-    return parseISODate(CONFIG.FROZEN_TODAY_ISO); // frozen "today"
+    return parseISODate(CONFIG.FROZEN_TODAY_ISO); // your frozen "today"
   }
   const y = seasonStartYear(seasonKey);
   return new Date(Date.UTC(y, CONFIG.PAST_SEASON_REF_MONTH - 1, CONFIG.PAST_SEASON_REF_DAY));
@@ -63,7 +63,7 @@ function fmtRating(n) {
 function renderStaticIdentity() {
   setText("p-name", PLAYER.name);
   setText("p-nat", PLAYER.nationality);
-  setText("p-dob", "03 Jun 2005");                 // keep display-friendly!!!
+  setText("p-dob", "03 Jun 2005");                 // keep display-friendly
   setText("p-height", `${PLAYER.heightCm} cm`);
   setText("p-weight", PLAYER.weightKg ? `${PLAYER.weightKg} kg` : "[Add later]");
   setText("p-foot", PLAYER.preferredFoot);
@@ -186,4 +186,183 @@ function drawLineChart(canvasId, labels, values, yMinPad=0.2, yMaxPad=0.2) {
   values.forEach((v, i) => {
     const x = pad + i * xStep;
     const y = (h - pad) - ((v - yMin) / (yMax - yMin)) * (h - 2*pad);
-    if (i === 0) ctx.moveTo(x, y
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // points + labels
+  ctx.fillStyle = "#111";
+  ctx.font = "11px Arial";
+  values.forEach((v, i) => {
+    const x = pad + i * xStep;
+    const y = (h - pad) - ((v - yMin) / (yMax - yMin)) * (h - 2*pad);
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.fillText(labels[i], x - 18, h - 10);
+    ctx.fillText(v.toFixed(2), x - 14, y - 8);
+  });
+}
+
+function drawBarChart(canvasId, labels, values) {
+  const c = el(canvasId);
+  const ctx = c.getContext("2d");
+  const w = c.width, h = c.height;
+  const pad = 28;
+
+  clearCanvas(ctx, w, h);
+  drawAxes(ctx, w, h, pad);
+
+  const maxV = Math.max(...values, 1);
+  const barW = (w - 2*pad) / labels.length * 0.6;
+  const gap = (w - 2*pad) / labels.length * 0.4;
+
+  ctx.fillStyle = "#111";
+  ctx.font = "11px Arial";
+
+  labels.forEach((lab, i) => {
+    const x0 = pad + i * (barW + gap) + gap/2;
+    const barH = (values[i] / maxV) * (h - 2*pad);
+    const y0 = (h - pad) - barH;
+
+    ctx.strokeStyle = "#111";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x0, y0, barW, barH);
+
+    ctx.fillText(lab, x0 - 2, h - 10);
+    ctx.fillText(String(values[i]), x0 + barW/2 - 4, y0 - 6);
+  });
+}
+
+function renderCharts() {
+  const labels = SEASON_ORDER;
+  const ratings = labels.map(s => SEASONS[s].general.rating);
+  const gi = labels.map(s => SEASONS[s].additional.gi);
+
+  drawLineChart("chartRating", labels, ratings, 0.15, 0.15);
+  drawBarChart("chartGI", labels, gi);
+}
+
+/* =========================
+   CONTROLLER (events + state)
+========================= */
+
+const state = {
+  season: CONFIG.DEFAULT_SEASON,
+  mode: "LIVE"
+};
+
+function setStatus(msg) {
+  setText("statusLine", `Status: ${msg}`);
+}
+
+function initSeasonSelect() {
+  const sel = el("seasonSelect");
+  sel.innerHTML = "";
+  SEASON_ORDER.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s;
+    opt.textContent = s;
+    sel.appendChild(opt);
+  });
+  sel.value = state.season;
+
+  sel.addEventListener("change", () => {
+    state.season = sel.value;
+    renderSeason(state.season);
+    setStatus(`season applied → ${state.season} (${state.mode})`);
+  });
+}
+
+function initModeToggle() {
+  const bLive = el("toggleLive");
+  const bVideo = el("toggleVideo");
+
+  function applyMode(mode) {
+    state.mode = mode;
+    bLive.classList.toggle("active", mode === "LIVE");
+    bVideo.classList.toggle("active", mode === "VIDEO");
+    setStatus(`mode set to ${mode} (season ${state.season})`);
+  }
+
+  bLive.addEventListener("click", () => applyMode("LIVE"));
+  bVideo.addEventListener("click", () => applyMode("VIDEO"));
+}
+
+function initScoutingSummary() {
+  el("btnScouting").addEventListener("click", () => {
+    const s = SEASONS[state.season];
+    const ref = referenceDateForSeason(state.season);
+    const age = computeAge(PLAYER.dobISO, ref);
+
+    const summary =
+`SCOUTING SUMMARY
+Player: ${PLAYER.name}
+Season: ${state.season}
+Club: ${s.club} | League: ${s.league}
+Age (ref ${ref.toISOString().slice(0,10)}): ${age}
+Position: ${PLAYER.primaryPosition}
+Mode: ${state.mode}
+
+Core:
+MP ${s.general.mp} | MIN ${s.general.min} | G ${s.general.gls} | A ${s.general.ast} | Rating ${s.general.rating.toFixed(2)}
+
+Additional:
+xG ${s.additional.xg} | xA ${s.additional.xa} | GI ${s.additional.gi} | xGI ${s.additional.xgi}
+
+Reminder:
+Complete the written sections (Physical/Technical/Tactical/Personal opinion) + add match observations.`;
+
+    alert(summary);
+  });
+}
+
+/* Drag dot */
+function initPitchDotDrag() {
+  const dot = el("posDot");
+  const pitch = dot.parentElement;
+  let dragging = false;
+
+  const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+
+  dot.addEventListener("mousedown", (e) => {
+    dragging = true;
+    dot.style.cursor = "grabbing";
+    e.preventDefault();
+  });
+
+  window.addEventListener("mouseup", () => {
+    dragging = false;
+    dot.style.cursor = "grab";
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const r = pitch.getBoundingClientRect();
+    const x = clamp(e.clientX - r.left, 0, r.width);
+    const y = clamp(e.clientY - r.top, 0, r.height);
+    dot.style.left = (x / r.width * 100).toFixed(2) + "%";
+    dot.style.top  = (y / r.height * 100).toFixed(2) + "%";
+  });
+}
+
+/* =========================
+   BOOTSTRAP
+========================= */
+
+function init() {
+  renderStaticIdentity();
+  initSeasonSelect();
+  initModeToggle();
+  initScoutingSummary();
+  initPitchDotDrag();
+
+  // initial render
+  renderSeason(state.season);
+  renderCharts();
+  setStatus(`ready (default season ${state.season}, frozen date ${CONFIG.FROZEN_TODAY_ISO})`);
+}
+
+init();
